@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>臨時スタッフ給与計算アプリ</title>
+  <style>
+    body { font-family: "Helvetica Neue", Arial, sans-serif; margin: 0; background: #f8f5f0; color: #3e2c1c;}
+    header { background: #8b5e3c; color: #fff; text-align: center; padding: 1rem; font-size: 1.5rem;}
+    nav { display: flex; justify-content: space-around; background: #a47148;}
+    nav button { flex: 1; padding: 1rem; border: none; background: #a47148; color: #fff; font-size: 1.2rem; cursor: pointer;}
+    nav button.active { background: #8b5e3c;}
+    .container { padding: 1rem;}
+    h2 { font-size: 1.4rem; border-left: 6px solid #a47148; padding-left: 0.5rem;}
+    label { display: block; margin: 1rem 0 0.5rem; font-size: 1.1rem;}
+    input, select { width: 100%; padding: 0.8rem; font-size: 1.1rem; margin-bottom: 0.5rem; border: 1px solid #ccc; border-radius: 6px;}
+    button.action { width: 100%; background: #8b5e3c; color: white; border: none; padding: 1rem; font-size: 1.2rem; border-radius: 8px; margin-top: 1rem; cursor: pointer;}
+    .card { background: #fff; margin: 0.5rem 0; padding: 1rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); font-size: 1rem;}
+    .card button { margin-right: 0.5rem; margin-top: 0.5rem; font-size: 1rem; padding: 0.5rem 1rem;}
+    .result { font-weight: bold; margin-top: 1rem; font-size: 1.2rem;}
+  </style>
+</head>
+<body>
+  <header>臨時スタッフ給与計算アプリ</header>
+  <nav>
+    <button id="nav-input" class="active">支払入力</button>
+    <button id="nav-history">履歴</button>
+    <button id="nav-settings">設定</button>
+  </nav>
+
+  <div class="container" id="input-section">
+    <h2>支払い入力</h2>
+    <label>施術日</label>
+    <input type="date" id="pay-date">
+
+    <label>スタッフ</label>
+    <select id="staff-select"></select>
+
+    <label>施術人数</label>
+    <input type="number" id="num-patients" placeholder="人数">
+
+    <label>施設</label>
+    <select id="facility-select"></select>
+
+    <div class="result" id="calc-result">給与: 0円 + 交通費: 0円 = 合計: 0円</div>
+    <button class="action" onclick="savePayment()">登録</button>
+  </div>
+
+  <div class="container" id="history-section" style="display:none;">
+    <h2>履歴</h2>
+    <label>CSV出力する月を選択</label>
+    <input type="month" id="csv-month">
+    <button class="action" onclick="exportCSV()">CSV出力</button>
+    <div id="history-list"></div>
+  </div>
+
+  <div class="container" id="settings-section" style="display:none;">
+    <h2>スタッフ設定</h2>
+    <label>名前</label>
+    <input type="text" id="staff-name" placeholder="スタッフ名">
+    <label>住所</label>
+    <input type="text" id="staff-address" placeholder="住所">
+    <button class="action" onclick="addStaff()">スタッフ追加</button>
+    <div id="staff-list"></div>
+
+    <h2>施設設定</h2>
+    <label>施設名</label>
+    <input type="text" id="facility-name" placeholder="施設名">
+    <label>住所</label>
+    <input type="text" id="facility-address" placeholder="住所">
+    <label>距離 (km)</label>
+    <input type="number" id="facility-distance" placeholder="距離">
+    <button class="action" onclick="addFacility()">施設追加</button>
+    <div id="facility-list"></div>
+
+    <h2>単価設定</h2>
+    <label>施術単価 (円)</label>
+    <input type="number" id="unit-price" value="1000">
+    <label>交通費単価 (円/km)</label>
+    <input type="number" id="transport-unit" value="25">
+    <button class="action" onclick="saveSettings()">単価保存</button>
+  </div>
+
+  <script>
+    let staffs = JSON.parse(localStorage.getItem("staffs") || "[]");
+    let facilities = JSON.parse(localStorage.getItem("facilities") || "[]");
+    let payments = JSON.parse(localStorage.getItem("payments") || "[]");
+    let unitPrice = Number(localStorage.getItem("unitPrice") || 1000);
+    let transportUnit = Number(localStorage.getItem("transportUnit") || 25);
+
+    const staffSelect = document.getElementById("staff-select");
+    const facilitySelect = document.getElementById("facility-select");
+    const numPatientsInput = document.getElementById("num-patients");
+    const dateInput = document.getElementById("pay-date");
+
+    // -----------------------
+    // 表示更新
+    // -----------------------
+    function renderStaffs() {
+      staffSelect.innerHTML = staffs.map((s,i)=>`<option value="${i}">${s.name}</option>`).join("");
+      document.getElementById("staff-list").innerHTML = staffs.map((s,i)=>
+        `<div class="card">${s.name} (${s.address}) 
+        <button onclick="deleteStaff(${i})">削除</button></div>`).join("");
+    }
+    function renderFacilities() {
+      facilitySelect.innerHTML = facilities.map((f,i)=>`<option value="${i}">${f.name}</option>`).join("");
+      document.getElementById("facility-list").innerHTML = facilities.map((f,i)=>
+        `<div class="card">${f.name} 距離:${f.distance}km 
+        <button onclick="deleteFacility(${i})">削除</button></div>`).join("");
+    }
+    function renderHistory() {
+      document.getElementById("history-list").innerHTML = payments.map((p,i)=>
+        `<div class="card">${p.date} ${p.staff} @${p.facility}<br>
+        給与:${p.salary}円 交通費:${p.transport}円 合計:${p.total}円
+        <button onclick="deletePayment(${i})">削除</button></div>`).join("");
+    }
+
+    // -----------------------
+    // 計算
+    // -----------------------
+    function updateCalculation() {
+      const num = Number(numPatientsInput.value);
+      const facilityIdx = facilitySelect.value;
+      let salary = num * unitPrice;
+      let transport = (facilities[facilityIdx]?.distance || 0) * transportUnit * 2;
+      let total = salary + transport;
+      document.getElementById("calc-result").textContent = `給与: ${salary}円 + 交通費: ${transport}円 = 合計: ${total}円`;
+    }
+
+    // 入力変化で再計算
+    numPatientsInput.addEventListener("input", updateCalculation);
+    facilitySelect.addEventListener("change", updateCalculation);
+
+    // -----------------------
+    // 支払い登録
+    // -----------------------
+    function savePayment() {
+      const date = dateInput.value;
+      const staffIdx = staffSelect.value;
+      const num = Number(numPatientsInput.value);
+      const facilityIdx = facilitySelect.value;
+      if(date==="" || staffIdx==="" || num<=0 || facilityIdx===""){alert("入力不足");return;}
+
+      const salary = num * unitPrice;
+      const transport = facilities[facilityIdx].distance * transportUnit * 2;
+      const total = salary + transport;
+
+      payments.push({date,staff:staffs[staffIdx].name,num,facility:facilities[facilityIdx].name,salary,transport,total});
+      localStorage.setItem("payments",JSON.stringify(payments));
+      renderHistory();
+      updateCalculation();
+      alert("保存しました！");
+    }
+
+    // -----------------------
+    // CSV出力
+    // -----------------------
+    function exportCSV() {
+      const month = document.getElementById("csv-month").value;
+      if (!month) { alert("月を選択してください"); return; }
+      const filtered = payments.filter(p => p.date.startsWith(month));
+      if (filtered.length === 0) { alert("データがありません"); return; }
+
+      let csv = "日付,スタッフ,施設,人数,給与,交通費,合計\n";
+      filtered.forEach(p=>{
+        csv += `${p.date},${p.staff},${p.facility},${p.num},${p.salary},${p.transport},${p.total}\n`;
+      });
+
+      const blob = new Blob([csv], {type:"text/csv"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `payments_${month}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // -----------------------
+    // データ管理
+    // -----------------------
+    function addStaff() {
+      const name=document.getElementById("staff-name").value;
+      const addr=document.getElementById("staff-address").value;
+      if(!name) return;
+      staffs.push({name,address:addr});
+      localStorage.setItem("staffs",JSON.stringify(staffs));
+      renderStaffs();
+    }
+    function deleteStaff(i){staffs.splice(i,1);localStorage.setItem("staffs",JSON.stringify(staffs));renderStaffs();}
+    function addFacility() {
+      const name=document.getElementById("facility-name").value;
+      const addr=document.getElementById("facility-address").value;
+      const dist=Number(document.getElementById("facility-distance").value);
+      if(!name||dist<=0)return;
+      facilities.push({name,address:addr,distance:dist});
+      localStorage.setItem("facilities",JSON.stringify(facilities));
+      renderFacilities();
+    }
+    function deleteFacility(i){facilities.splice(i,1);localStorage.setItem("facilities",JSON.stringify(facilities));renderFacilities();}
+    function deletePayment(i){payments.splice(i,1);localStorage.setItem("payments",JSON.stringify(payments));renderHistory();}
+    function saveSettings() {
+      unitPrice=Number(document.getElementById("unit-price").value);
+      transportUnit=Number(document.getElementById("transport-unit").value);
+      localStorage.setItem("unitPrice",unitPrice);
+      localStorage.setItem("transportUnit",transportUnit);
+      updateCalculation();
+      alert("単価を保存しました");
+    }
+
+    // -----------------------
+    // ナビ切替
+    // -----------------------
+    document.getElementById("nav-input").onclick=()=>{showSection("input"); updateCalculation();};
+    document.getElementById("nav-history").onclick=()=>{showSection("history");renderHistory()};
+    document.getElementById("nav-settings").onclick=()=>{showSection("settings")};
+    function showSection(sec){
+      document.getElementById("input-section").style.display=(sec==="input")?"block":"none";
+      document.getElementById("history-section").style.display=(sec==="history")?"block":"none";
+      document.getElementById("settings-section").style.display=(sec==="settings")?"block":"none";
+      document.querySelectorAll("nav button").forEach(b=>b.classList.remove("active"));
+      document.getElementById("nav-"+sec).classList.add("active");
+    }
+
+    // 初期化
+    renderStaffs();
+    renderFacilities();
+    renderHistory();
+    updateCalculation();
+  </script>
+</body>
+</html>
